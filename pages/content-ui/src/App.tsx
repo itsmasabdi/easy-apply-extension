@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@extension/ui';
 import { useStorage } from '@extension/shared';
-import { exampleThemeStorage } from '@extension/storage';
+import { myStorage } from '@extension/storage';
 import LoadingSpinner from './spinner';
 
 export default function App() {
-  const { theme, user_id } = useStorage(exampleThemeStorage);
+  const { theme, userId } = useStorage(myStorage);
+  const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 
   // States for the left button
   const [iconColor, setIconColor] = useState('blue');
@@ -70,6 +71,14 @@ export default function App() {
     window.addEventListener('scroll', handleScrollOrResize);
     window.addEventListener('resize', handleScrollOrResize);
 
+    // Load selected documents from storage when the component mounts
+    const loadSelectedDocuments = async () => {
+      const storedSelectedDocuments = await myStorage.getSelectedDocuments();
+      setSelectedDocuments(storedSelectedDocuments);
+    };
+
+    loadSelectedDocuments();
+
     return () => {
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
@@ -80,12 +89,19 @@ export default function App() {
 
   const summarizeDOM = () => {
     const inputs = document.querySelectorAll('input, textarea');
-    const fields = Array.from(inputs).map((input: HTMLInputElement | HTMLTextAreaElement) => ({
-      id: input.id,
-      name: input.name,
-      type: input.type,
-      value: input.value,
-      placeholder: input.placeholder,
+    const fields = Array.from(inputs).map((element: HTMLInputElement | HTMLTextAreaElement) => ({
+      tagName: element.tagName,
+      type: element.type,
+      name: element.name,
+      id: element.id,
+      value: element.value,
+      placeholder: element.placeholder,
+      label: element.labels
+        ? Array.from(element.labels)
+            .map(label => label.innerText)
+            .join(' ')
+        : '',
+      surroundingText: element.closest('form') ? element.closest('form').innerText : '',
     }));
     return fields;
   };
@@ -95,11 +111,13 @@ export default function App() {
     setIconColor('yellow');
     const fields = summarizeDOM();
     console.log('fields', fields);
+    console.log('selectedDocuments', selectedDocuments);
     chrome.runtime.sendMessage(
       {
         action: 'getAutofillData',
-        user_id: user_id,
+        userId: userId,
         fields: fields,
+        document_ids: selectedDocuments,
       },
       response => {
         setIsLoading(false);
@@ -120,18 +138,26 @@ export default function App() {
       setIsActiveInputLoading(true);
       setActiveInputIconColor('yellow');
       const field = {
-        id: activeInput.id,
-        name: activeInput.getAttribute('name'),
+        tagName: activeInput.tagName,
         type: (activeInput as HTMLInputElement).type || '',
+        name: activeInput.getAttribute('name'),
+        id: activeInput.id,
         value: (activeInput as HTMLInputElement).value,
         placeholder: (activeInput as HTMLInputElement).placeholder,
+        label: activeInput.labels
+          ? Array.from(activeInput.labels)
+              .map(label => label.innerText)
+              .join(' ')
+          : '',
+        surroundingText: activeInput.closest('form') ? activeInput.closest('form').innerText : '',
       };
       console.log('field', field);
       chrome.runtime.sendMessage(
         {
           action: 'getAutofillData',
-          user_id: user_id,
-          fields: [field], // Send as array with one element
+          userId: userId,
+          fields: [field],
+          document_ids: selectedDocuments,
         },
         response => {
           setIsActiveInputLoading(false);
@@ -171,7 +197,6 @@ export default function App() {
       {/* Left-side Button */}
       <div className="fixed left-0 top-1/2 transform -translate-y-1/2 z-50">
         <Button
-          theme={theme}
           onClick={handleIconClick}
           className={`w-10 h-10 rounded-full shadow-lg transition-colors duration-200 ${
             iconColor === 'blue'
@@ -198,7 +223,6 @@ export default function App() {
             pointerEvents: 'auto',
           }}>
           <Button
-            theme={theme}
             onClick={handleActiveInputButtonClick}
             onMouseDown={e => e.preventDefault()} // Prevent input from losing focus
             tabIndex={-1} // Prevent button from receiving focus

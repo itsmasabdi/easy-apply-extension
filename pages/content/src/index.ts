@@ -4,9 +4,6 @@ console.log('content script loaded');
 
 void toggleTheme();
 
-// // Send a message to the background script to inject the runtime content script
-// chrome.runtime.sendMessage({ action: 'injectRuntimeScript' });
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'performAutofill') {
     const { selector, value } = message.data;
@@ -69,7 +66,6 @@ function findElement(selector: Record<string, string>): HTMLElement | null {
 
 function fillElement(element: HTMLElement, value: string) {
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    // Replace \n\n with actual newlines
     const formattedValue = value.replace(/\\n/g, '\n');
     element.value = formattedValue;
     element.dispatchEvent(new Event('input', { bubbles: true }));
