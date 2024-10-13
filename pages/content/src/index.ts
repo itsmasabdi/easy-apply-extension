@@ -18,6 +18,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       console.warn(`No element found for selector:`, selector);
     }
+  } else if (message.action === 'checkForEasyApplyId') {
+    console.log('Content: Checking for Easy Apply ID');
+    const easyApplyIdElement = document.querySelector('input[easy-apply-id]');
+    if (easyApplyIdElement) {
+      const easyApplyId = easyApplyIdElement.getAttribute('easy-apply-id');
+      console.log('Content: Easy Apply ID found:', easyApplyId);
+      sendResponse({ easyApplyId });
+    } else {
+      console.log('Content: Easy Apply ID not found');
+      sendResponse({ easyApplyId: null });
+    }
+    return true; // Indicates that the response will be sent asynchronously
   }
 });
 
@@ -75,4 +87,4 @@ function fillElement(element: HTMLElement, value: string) {
   }
 }
 
-console.log('Content-runtime script loaded');
+console.log('Content script loaded');

@@ -1,77 +1,95 @@
 import 'webextension-polyfill';
 import { exampleThemeStorage } from '@extension/storage';
-const BACKEND_URL = 'http://localhost:8080';
 
-const systemPrompt = `You are an autofill assistant. \
-Use the information bellow and return the action to autofill the fields.
-
-CONTEXT:
-\"\"\" \
-An experienced machine learning engineer with a proven track record in developing and deploying advanced ML models. Expertise spans across building end-to-end machine learning pipelines, including data preprocessing, analysis, model development, tuning, and deployment. Proficient in Python with a solid understanding of TensorFlow, PyTorch, scikit-learn, and container technologies like Docker and Kubernetes. Familiar with leveraging both proprietary and third-party APIs to enhance model functionality. Committed to driving business growth through data-driven decision-making and rapid iteration of ML-driven features. Holds a strong foundation in computer science principles, emphasizing system design, data structures, and architecture. Capable of translating complex deep learning research into practical applications, delivering value to users. Adept at articulating technical concepts to diverse audiences, ensuring seamless integration of AI solutions into business processes.
-
-Name: Mas Abdi
-Email: masoudabdi13@gmail.com
-Residency: Australia (Citizen)
-GitHub: https://github.com/itsmasabdi
-Phone: +61 481 393 533
-LinkedIn: www.linkedin.com/in/masabdi
-\"\"\" \
-
-THE OUTPUT SHOULD BE IN THIS FORMAT:
-<action> type(selector={"key": "value"}, "value") </action>
-
-WHERE "key" and "value" are html attributes of the field.
-
-EXAMPLE:
-<action> type({ "id": "name" }, "Mas Abdi") </action>
-<action> type({ "name": "email" }, "masabdi@gmail.com") </action>
-<action> type({ "label": "Phone" }, "081234567890") </action>
-
-MAKE SURE TO ANSWER ALL OF THE FIELDS PROVIDED INCLUDING COVER LETTER!
-`;
-exampleThemeStorage.get().then(theme => {
-  console.log('theme', theme);
+let user_id: string | null = null;
+exampleThemeStorage.getUserId().then(id => {
+  user_id = id;
 });
+
+console.log('Background script loaded');
 
 console.log('background loaded');
 console.log("Edit 'chrome-extension/src/background/index.ts' and save to reload.");
 
+const BACKEND_URL = 'http://localhost:8080';
+// const BACKEND_URL = 'https://backend-prod-jbzvblgmza-ts.a.run.app'
+const FRONTEND_URL = 'http://localhost:3000';
+// const FRONTEND_URL = 'https://easyapply.ai';
+
+const MAX_CHECK_TIME = 60000; // 60 seconds
+const CHECK_INTERVAL = 1000; // 1 second
+
+function checkForEasyApplyId(tabId: number) {
+  return new Promise<string>((resolve, reject) => {
+    let elapsedTime = 0;
+
+    // Add a small delay before starting to check
+    setTimeout(() => {
+      const checkInterval = setInterval(() => {
+        chrome.tabs.sendMessage(tabId, { action: 'checkForEasyApplyId' }, response => {
+          if (chrome.runtime.lastError) {
+            console.log('Background: Error sending message:', chrome.runtime.lastError);
+            // Don't return here, continue checking
+          }
+
+          if (response && response.easyApplyId) {
+            clearInterval(checkInterval);
+            resolve(response.easyApplyId);
+          }
+
+          elapsedTime += CHECK_INTERVAL;
+          if (elapsedTime >= MAX_CHECK_TIME) {
+            clearInterval(checkInterval);
+            reject('Timeout: Easy Apply ID not found');
+          }
+        });
+      }, CHECK_INTERVAL);
+    }, 1000); // 1 second delay
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'injectRuntimeScript' && sender.tab) {
-    chrome.scripting
-      .executeScript({
-        target: { tabId: sender.tab.id },
-        files: ['/content-runtime/index.iife.js'],
-      })
-      .then(() => {
-        console.log('Runtime content script injected successfully');
-      })
-      .catch(err => {
-        console.error('Failed to inject runtime content script:', err);
-        if (err.message.includes('Cannot access a chrome:// URL')) {
-          console.warn('Cannot inject script into chrome:// or about:// pages');
-        }
-      });
+  console.log('Background: Message received:', message);
+
+  if (message.action === 'startAuthentication') {
+    console.log('Background: Starting authentication process');
+    chrome.tabs.create({ url: `${FRONTEND_URL}/app/profile` }, tab => {
+      console.log('Background: New tab created:', tab.id);
+
+      if (tab.id) {
+        chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+          if (tabId === tab.id && info.status === 'complete') {
+            console.log('Background: Tab loaded, starting to check for Easy Apply ID');
+            chrome.tabs.onUpdated.removeListener(listener);
+
+            checkForEasyApplyId(tab.id)
+              .then(easyApplyId => {
+                console.log('Background: Easy Apply ID found:', easyApplyId);
+                chrome.storage.local.set({ easyApplyId }, () => {
+                  console.log('Background: Easy Apply ID stored, sending authenticationComplete message');
+                  chrome.runtime.sendMessage({ action: 'authenticationComplete', easyApplyId });
+                });
+              })
+              .catch(error => {
+                console.log('Background: Error finding Easy Apply ID:', error);
+                chrome.runtime.sendMessage({ action: 'authenticationFailed', error });
+              });
+          }
+        });
+      }
+    });
   } else if (message.action === 'getAutofillData') {
     console.log('Background: Getting autofill data');
 
-    fetch(`${BACKEND_URL}/stream`, {
+    fetch(`${BACKEND_URL}/autofil`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         mode: message.mode,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content:
-              'Here are the fields to be autfilled: ' +
-              message.fields?.map((field: any) => JSON.stringify(field)).join(', ') +
-              '\n MAKE SURE TO ANSWER ALL OF THE FIELDS PROVIDED!',
-          },
-        ],
+        user_id: message.user_id,
+        fields: message.fields,
       }),
     })
       .then(response => {

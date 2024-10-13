@@ -5,7 +5,7 @@ import { exampleThemeStorage } from '@extension/storage';
 import LoadingSpinner from './spinner';
 
 export default function App() {
-  const theme = useStorage(exampleThemeStorage);
+  const { theme, user_id } = useStorage(exampleThemeStorage);
 
   // States for the left button
   const [iconColor, setIconColor] = useState('blue');
@@ -98,7 +98,7 @@ export default function App() {
     chrome.runtime.sendMessage(
       {
         action: 'getAutofillData',
-        user_id: '66bb3bbff2b62c6928f0c94a',
+        user_id: user_id,
         fields: fields,
       },
       response => {
@@ -130,7 +130,7 @@ export default function App() {
       chrome.runtime.sendMessage(
         {
           action: 'getAutofillData',
-          user_id: '66bb3bbff2b62c6928f0c94a',
+          user_id: user_id,
           fields: [field], // Send as array with one element
         },
         response => {
